@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BLE AI Community Finder</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<style>
+body{
+font-family:system-ui;
+background:#0f172a;
+color:white;
+padding:20px;
+margin:0;
+}
+.card{
+background:#1e293b;
+padding:20px;
+border-radius:20px;
+max-width:500px;
+margin:auto;
+}
+button{
+width:100%;
+padding:14px;
+margin-top:12px;
+border:none;
+border-radius:12px;
+font-weight:bold;
+font-size:16px;
+cursor:pointer;
+}
+.primary{background:#3b82f6;color:white;}
+.secondary{background:#334155;color:white;}
+.ai{background:#9333ea;color:white;}
+.status-ok{color:#22c55e;}
+.status-bad{color:#ef4444;}
+#map{
+height:400px;
+margin-top:15px;
+border-radius:15px;
+display:none;
+}
+</style>
+</head>
+<body>
+
+<div class="card">
+<h2>BLE AI Community Finder</h2>
+
+<p>Device: <b id="deviceName">Not Connected</b></p>
+<p>Status: <b id="status" class="status-bad">DISCONNECTED</b></p>
+
+<button class="primary" onclick="connectTag()">Connect Tag (Owner)</button>
+<button class="secondary" onclick="communityScan()">Community Scan</button>
+<button class="secondary" onclick="showLocation()">Show Location</button>
+<button class="ai" onclick="runAI()">Run AI Analysis</button>
+
+<div id="map"></div>
+</div>
+
+<script>
+
+/* ================= FIREBASE CONFIG ================= */
+
+const firebaseConfig = {  
+apiKey: "AIzaSyDtoD3Fa6daF6kHsZHRsXgrLwiyxSQCZZk",  
+authDomain: "ble-tag-finder.firebaseapp.com",  
+projectId: "ble-tag-finder",  
+storageBucket: "ble-tag-finder.firebasestorage.app",  
+messagingSenderId: "658694213686",  
+appId: "1:658694213686:web:ed81547228034482f44897",  
+measurementId: "G-WTZ3H6CWNW"  
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+/* ================= GLOBALS ================= */
+
+let bleDevice = null;
+let deviceId = null;
+let map = null;
+let communityMarkers = [];
+let aiMarker = null;
+
+/* ================= PERMISSIONS ================= */
+
+async function requestPermissions(){
+if(Notification.permission !== "granted"){
+await Notification.requestPermission();
+}
+navigator.geolocation.getCurrentPosition(()=>{},()=>{},{
+enableHighAccuracy:true
+});
+}
+
+/* ================= CONNECT TAG ================= */
+
+async function connectTag(){
+
+await requestPermissions();
+
+bleDevice = await navigator.bluetooth.requestDevice({
+acceptAllDevices:true
+});
+
+deviceId = bleDevice.id;
+localStorage.setItem("bleDeviceId", deviceId);
+
+document.getElementById("deviceName").innerText =
+bleDevice.name || "BLE Device";
+
+await bleDevice.gatt.connect();
+
+updateStatus(true);
+
+bleDevice.addEventListener("gattserverdisconnected", ()=>{
+updateStatus(false);
+});
+
+listenForOwnerUpdates();
+}
+
+/* ================= STATUS ================= */
+
+function updateStatus(state){
+const s=document.getElementById("status");
+if(state){
+s.innerText="CONNECTED & IN RANGE";
+s.className="status-ok";
+}else{
+s.innerText="OUT OF RANGE";
+s.className="status-bad";
+}
+}
+
+/* ================= COMMUNITY SCAN ================= */
+
+async function communityScan(){
+
+await requestPermissions();
+
+const device = await navigator.bluetooth.requestDevice({
+acceptAllDevices:true
+});
+
+const detectedId = device.id;
+
+navigator.geolocation.getCurrentPosition(async(pos)=>{
+
+await db.collection("tags").doc(detectedId)
+.collection("detections")
+.add({
+lat:pos.coords.latitude,
+lng:pos.coords.longitude,
+timestamp:Date.now()
+});
+
+alert("Community Detection Uploaded");
+
+},{enableHighAccuracy:true});
+
+}
+
+/* ================= OWNER REALTIME ALERT ================= */
+
+function listenForOwnerUpdates(){
+
+if(!deviceId) return;
+
+db.collection("tags").doc(deviceId)
+.collection("detections")
+.onSnapshot(snapshot=>{
+
+if(snapshot.docChanges().length>0){
+
+if(Notification.permission==="granted"){
+new Notification("Your device was detected by community!");
+}
+
+if(navigator.vibrate){
+navigator.vibrate([300,200,300]);
+}
+
+}
+
+});
+
+}
+
+/* ================= SHOW LOCATION ================= */
+
+async function showLocation(){
+
+if(!deviceId){
+alert("Connect first");
+return;
+}
+
+const snapshot = await db.collection("tags")
+.doc(deviceId)
+.collection("detections")
+.get();
+
+if(snapshot.empty){
+alert("No detections yet");
+return;
+}
+
+const mapDiv=document.getElementById("map");
+mapDiv.style.display="block";
+
+let points=[];
+
+snapshot.forEach(doc=>{
+points.push(doc.data());
+});
+
+renderMap(points);
+}
+
+/* ================= RUN AI ================= */
+
+async function runAI(){
+
+if(!deviceId){
+alert("Connect first");
+return;
+}
+
+const snapshot = await db.collection("tags")
+.doc(deviceId)
+.collection("detections")
+.get();
+
+if(snapshot.empty){
+alert("No detections for AI");
+return;
+}
+
+let points=[];
+snapshot.forEach(doc=>{
+points.push(doc.data());
+});
+
+renderMap(points,true);
+}
+
+/* ================= MAP RENDER ================= */
+
+function renderMap(points,runAI=false){
+
+const mapDiv=document.getElementById("map");
+mapDiv.style.display="block";
+
+if(!map){
+
+map=L.map("map").setView([points[0].lat,points[0].lng],18);
+
+// Satellite imagery
+L.tileLayer(
+"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+{attribution:"Tiles © Esri"}
+).addTo(map);
+
+// Labels overlay
+L.tileLayer(
+"https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+{attribution:"Labels © Esri"}
+).addTo(map);
+
+}else{
+communityMarkers.forEach(m=>map.removeLayer(m));
+communityMarkers=[];
+if(aiMarker) map.removeLayer(aiMarker);
+}
+
+/* Blue community dots */
+points.forEach(p=>{
+const m=L.circleMarker([p.lat,p.lng],{
+radius:7,
+color:"blue",
+fillColor:"#3b82f6",
+fillOpacity:0.9
+}).addTo(map);
+communityMarkers.push(m);
+});
+
+/* AI estimation */
+if(runAI){
+
+let avgLat=0, avgLng=0;
+points.forEach(p=>{
+avgLat+=p.lat;
+avgLng+=p.lng;
+});
+
+avgLat/=points.length;
+avgLng/=points.length;
+
+aiMarker=L.circleMarker([avgLat,avgLng],{
+radius:10,
+color:"red",
+fillColor:"red",
+fillOpacity:1
+}).addTo(map).bindPopup("AI Estimated Location").openPopup();
+
+map.setView([avgLat,avgLng],18);
+
+}else{
+map.setView([points[0].lat,points[0].lng],18);
+}
+
+setTimeout(()=>map.invalidateSize(),300);
+}
+
+</script>
+</body>
+</html>
