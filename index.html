@@ -28,10 +28,10 @@ button{width:100%;padding:14px;margin-top:12px;border:none;border-radius:12px;fo
 <div class="card">
 <h2>BLE AI Community Finder</h2>
 
-<p>Device: <b id="deviceName">Not Connected</b></p>
-<p>Status: <b id="status" class="status-bad">DISCONNECTED</b></p>
+<p>Device: <b id="deviceName">Not Registered</b></p>
+<p>Status: <b id="status" class="status-bad">NOT CONNECTED</b></p>
 
-<button class="primary" onclick="connectTag()">Connect Tag (Owner)</button>
+<button class="primary" onclick="connectTag()">Register Tag (One Time)</button>
 <button class="secondary" onclick="communityScan()">Community Scan</button>
 <button class="secondary" onclick="showLocation()">Show Location</button>
 <button class="ai" onclick="runAI()">Run AI Analysis</button>
@@ -54,104 +54,95 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 /* GLOBALS */
-let bleDevice=null;
-let deviceId=null;
+let deviceId = localStorage.getItem("bleDeviceId");
 let map=null;
 let communityMarkers=[];
 let aiMarker=null;
 
 /* AUTO LOAD SAVED DEVICE */
 window.onload=function(){
-deviceId=localStorage.getItem("bleDeviceId");
 if(deviceId){
-document.getElementById("deviceName").innerText="Saved Device";
-listenForOwnerUpdates();
+document.getElementById("deviceName").innerText="Registered Device";
+document.getElementById("status").innerText="READY";
+document.getElementById("status").className="status-ok";
 }
 }
 
-/* CONNECT */
+/* REGISTER ONCE */
 async function connectTag(){
-bleDevice=await navigator.bluetooth.requestDevice({acceptAllDevices:true});
+
+const bleDevice=await navigator.bluetooth.requestDevice({acceptAllDevices:true});
 deviceId=bleDevice.id;
+
 localStorage.setItem("bleDeviceId",deviceId);
 
-document.getElementById("deviceName").innerText=bleDevice.name||"BLE Device";
-await bleDevice.gatt.connect();
-updateStatus(true);
+document.getElementById("deviceName").innerText=bleDevice.name||"Registered Device";
+document.getElementById("status").innerText="READY";
+document.getElementById("status").className="status-ok";
 
-bleDevice.addEventListener("gattserverdisconnected",()=>{
-updateStatus(false);
-});
-listenForOwnerUpdates();
-}
-
-/* STATUS */
-function updateStatus(state){
-const s=document.getElementById("status");
-if(state){
-s.innerText="CONNECTED";
-s.className="status-ok";
-}else{
-s.innerText="DISCONNECTED";
-s.className="status-bad";
-}
+alert("Device Registered Successfully!");
 }
 
 /* COMMUNITY SCAN */
 async function communityScan(){
+
 const device=await navigator.bluetooth.requestDevice({acceptAllDevices:true});
 const detectedId=device.id;
 
 navigator.geolocation.getCurrentPosition(async(pos)=>{
-await db.collection("tags").doc(detectedId)
+
+await db.collection("tags")
+.doc(detectedId)
 .collection("detections")
 .add({
 lat:pos.coords.latitude,
 lng:pos.coords.longitude,
 timestamp:Date.now()
 });
-alert("Community Detection Uploaded");
+
+alert("Detection Uploaded");
+
 },{enableHighAccuracy:true});
 }
 
-/* OWNER LISTENER */
-function listenForOwnerUpdates(){
-if(!deviceId) return;
-db.collection("tags").doc(deviceId)
-.collection("detections")
-.onSnapshot(snapshot=>{
-if(snapshot.docChanges().length>0){
-if(Notification.permission==="granted"){
-new Notification("Device Detected!");
-}
-}
-});
-}
-
-/* SHOW LOCATION */
+/* SHOW LOCATION (NO CONNECT REQUIRED) */
 async function showLocation(){
-if(!deviceId){alert("No saved device");return;}
+
+if(!deviceId){
+alert("Register device once first");
+return;
+}
 
 const snapshot=await db.collection("tags")
 .doc(deviceId)
 .collection("detections").get();
 
-if(snapshot.empty){alert("No detections yet");return;}
+if(snapshot.empty){
+alert("No detections yet");
+return;
+}
 
 let points=[];
 snapshot.forEach(doc=>points.push(doc.data()));
 renderMap(points,false);
 }
 
-/* RUN AI */
+/* AI */
 async function runAI(){
-if(!deviceId){alert("No saved device");return;}
+
+if(!deviceId){
+alert("Register device once first");
+return;
+}
 
 const snapshot=await db.collection("tags")
 .doc(deviceId)
 .collection("detections").get();
 
-if(snapshot.empty){alert("No detections for AI");return;}
+if(snapshot.empty){
+alert("No detections for AI");
+return;
+}
 
 let points=[];
 snapshot.forEach(doc=>points.push(doc.data()));
@@ -159,7 +150,7 @@ renderMap(points,true);
 }
 
 /* MAP */
-function renderMap(points,ai=false){
+function renderMap(points,ai){
 
 document.getElementById("map").style.display="block";
 
@@ -174,7 +165,6 @@ L.tileLayer(
 L.tileLayer(
 "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
 ).addTo(map);
-
 }else{
 communityMarkers.forEach(m=>map.removeLayer(m));
 communityMarkers=[];
@@ -192,7 +182,7 @@ fillOpacity:1
 communityMarkers.push(m);
 });
 
-/* AI */
+/* AI RED DOT */
 if(ai){
 let avgLat=0,avgLng=0;
 points.forEach(p=>{
