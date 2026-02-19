@@ -12,41 +12,15 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <style>
-body{
-font-family:system-ui;
-background:#0f172a;
-color:white;
-padding:20px;
-margin:0;
-}
-.card{
-background:#1e293b;
-padding:20px;
-border-radius:20px;
-max-width:500px;
-margin:auto;
-}
-button{
-width:100%;
-padding:14px;
-margin-top:12px;
-border:none;
-border-radius:12px;
-font-weight:bold;
-font-size:16px;
-cursor:pointer;
-}
+body{font-family:system-ui;background:#0f172a;color:white;padding:20px;margin:0;}
+.card{background:#1e293b;padding:20px;border-radius:20px;max-width:500px;margin:auto;}
+button{width:100%;padding:14px;margin-top:12px;border:none;border-radius:12px;font-weight:bold;font-size:16px;cursor:pointer;}
 .primary{background:#3b82f6;color:white;}
 .secondary{background:#334155;color:white;}
 .ai{background:#9333ea;color:white;}
 .status-ok{color:#22c55e;}
 .status-bad{color:#ef4444;}
-#map{
-height:400px;
-margin-top:15px;
-border-radius:15px;
-display:none;
-}
+#map{height:400px;margin-top:15px;border-radius:15px;display:none;}
 </style>
 </head>
 <body>
@@ -67,94 +41,68 @@ display:none;
 
 <script>
 
-/* ================= FIREBASE CONFIG ================= */
-
+/* FIREBASE */
 const firebaseConfig = {  
 apiKey: "AIzaSyDtoD3Fa6daF6kHsZHRsXgrLwiyxSQCZZk",  
 authDomain: "ble-tag-finder.firebaseapp.com",  
 projectId: "ble-tag-finder",  
 storageBucket: "ble-tag-finder.firebasestorage.app",  
 messagingSenderId: "658694213686",  
-appId: "1:658694213686:web:ed81547228034482f44897",  
-measurementId: "G-WTZ3H6CWNW"  
+appId: "1:658694213686:web:ed81547228034482f44897"
 };
-
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-/* ================= GLOBALS ================= */
+/* GLOBALS */
+let bleDevice=null;
+let deviceId=null;
+let map=null;
+let communityMarkers=[];
+let aiMarker=null;
 
-let bleDevice = null;
-let deviceId = null;
-let map = null;
-let communityMarkers = [];
-let aiMarker = null;
-
-/* ================= PERMISSIONS ================= */
-
-async function requestPermissions(){
-if(Notification.permission !== "granted"){
-await Notification.requestPermission();
+/* AUTO LOAD SAVED DEVICE */
+window.onload=function(){
+deviceId=localStorage.getItem("bleDeviceId");
+if(deviceId){
+document.getElementById("deviceName").innerText="Saved Device";
+listenForOwnerUpdates();
 }
-navigator.geolocation.getCurrentPosition(()=>{},()=>{},{
-enableHighAccuracy:true
-});
 }
 
-/* ================= CONNECT TAG ================= */
-
+/* CONNECT */
 async function connectTag(){
+bleDevice=await navigator.bluetooth.requestDevice({acceptAllDevices:true});
+deviceId=bleDevice.id;
+localStorage.setItem("bleDeviceId",deviceId);
 
-await requestPermissions();
-
-bleDevice = await navigator.bluetooth.requestDevice({
-acceptAllDevices:true
-});
-
-deviceId = bleDevice.id;
-localStorage.setItem("bleDeviceId", deviceId);
-
-document.getElementById("deviceName").innerText =
-bleDevice.name || "BLE Device";
-
+document.getElementById("deviceName").innerText=bleDevice.name||"BLE Device";
 await bleDevice.gatt.connect();
-
 updateStatus(true);
 
-bleDevice.addEventListener("gattserverdisconnected", ()=>{
+bleDevice.addEventListener("gattserverdisconnected",()=>{
 updateStatus(false);
 });
-
 listenForOwnerUpdates();
 }
 
-/* ================= STATUS ================= */
-
+/* STATUS */
 function updateStatus(state){
 const s=document.getElementById("status");
 if(state){
-s.innerText="CONNECTED & IN RANGE";
+s.innerText="CONNECTED";
 s.className="status-ok";
 }else{
-s.innerText="OUT OF RANGE";
+s.innerText="DISCONNECTED";
 s.className="status-bad";
 }
 }
 
-/* ================= COMMUNITY SCAN ================= */
-
+/* COMMUNITY SCAN */
 async function communityScan(){
-
-await requestPermissions();
-
-const device = await navigator.bluetooth.requestDevice({
-acceptAllDevices:true
-});
-
-const detectedId = device.id;
+const device=await navigator.bluetooth.requestDevice({acceptAllDevices:true});
+const detectedId=device.id;
 
 navigator.geolocation.getCurrentPosition(async(pos)=>{
-
 await db.collection("tags").doc(detectedId)
 .collection("detections")
 .add({
@@ -162,118 +110,69 @@ lat:pos.coords.latitude,
 lng:pos.coords.longitude,
 timestamp:Date.now()
 });
-
 alert("Community Detection Uploaded");
-
 },{enableHighAccuracy:true});
-
 }
 
-/* ================= OWNER REALTIME ALERT ================= */
-
+/* OWNER LISTENER */
 function listenForOwnerUpdates(){
-
 if(!deviceId) return;
-
 db.collection("tags").doc(deviceId)
 .collection("detections")
 .onSnapshot(snapshot=>{
-
 if(snapshot.docChanges().length>0){
-
 if(Notification.permission==="granted"){
-new Notification("Your device was detected by community!");
+new Notification("Device Detected!");
 }
-
-if(navigator.vibrate){
-navigator.vibrate([300,200,300]);
 }
-
-}
-
 });
-
 }
 
-/* ================= SHOW LOCATION ================= */
-
+/* SHOW LOCATION */
 async function showLocation(){
+if(!deviceId){alert("No saved device");return;}
 
-if(!deviceId){
-alert("Connect first");
-return;
-}
-
-const snapshot = await db.collection("tags")
+const snapshot=await db.collection("tags")
 .doc(deviceId)
-.collection("detections")
-.get();
+.collection("detections").get();
 
-if(snapshot.empty){
-alert("No detections yet");
-return;
-}
-
-const mapDiv=document.getElementById("map");
-mapDiv.style.display="block";
+if(snapshot.empty){alert("No detections yet");return;}
 
 let points=[];
-
-snapshot.forEach(doc=>{
-points.push(doc.data());
-});
-
-renderMap(points);
+snapshot.forEach(doc=>points.push(doc.data()));
+renderMap(points,false);
 }
 
-/* ================= RUN AI ================= */
-
+/* RUN AI */
 async function runAI(){
+if(!deviceId){alert("No saved device");return;}
 
-if(!deviceId){
-alert("Connect first");
-return;
-}
-
-const snapshot = await db.collection("tags")
+const snapshot=await db.collection("tags")
 .doc(deviceId)
-.collection("detections")
-.get();
+.collection("detections").get();
 
-if(snapshot.empty){
-alert("No detections for AI");
-return;
-}
+if(snapshot.empty){alert("No detections for AI");return;}
 
 let points=[];
-snapshot.forEach(doc=>{
-points.push(doc.data());
-});
-
+snapshot.forEach(doc=>points.push(doc.data()));
 renderMap(points,true);
 }
 
-/* ================= MAP RENDER ================= */
+/* MAP */
+function renderMap(points,ai=false){
 
-function renderMap(points,runAI=false){
-
-const mapDiv=document.getElementById("map");
-mapDiv.style.display="block";
+document.getElementById("map").style.display="block";
 
 if(!map){
-
 map=L.map("map").setView([points[0].lat,points[0].lng],18);
 
-// Satellite imagery
 L.tileLayer(
 "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
 {attribution:"Tiles © Esri"}
 ).addTo(map);
 
-// Labels overlay
 L.tileLayer(
-"https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-{attribution:"Labels © Esri"}
+"https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
 ).addTo(map);
 
 }else{
@@ -288,20 +187,18 @@ const m=L.circleMarker([p.lat,p.lng],{
 radius:7,
 color:"blue",
 fillColor:"#3b82f6",
-fillOpacity:0.9
+fillOpacity:1
 }).addTo(map);
 communityMarkers.push(m);
 });
 
-/* AI estimation */
-if(runAI){
-
-let avgLat=0, avgLng=0;
+/* AI */
+if(ai){
+let avgLat=0,avgLng=0;
 points.forEach(p=>{
 avgLat+=p.lat;
 avgLng+=p.lng;
 });
-
 avgLat/=points.length;
 avgLng/=points.length;
 
@@ -310,10 +207,11 @@ radius:10,
 color:"red",
 fillColor:"red",
 fillOpacity:1
-}).addTo(map).bindPopup("AI Estimated Location").openPopup();
+}).addTo(map)
+.bindPopup("AI Estimated Location")
+.openPopup();
 
 map.setView([avgLat,avgLng],18);
-
 }else{
 map.setView([points[0].lat,points[0].lng],18);
 }
