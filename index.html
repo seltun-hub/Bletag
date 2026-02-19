@@ -1,45 +1,8 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BLE AI Community Finder</title>
-
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-
-<style>
-body{font-family:system-ui;background:#0f172a;color:white;padding:20px;margin:0;}
-.card{background:#1e293b;padding:20px;border-radius:20px;max-width:500px;margin:auto;}
-button{width:100%;padding:14px;margin-top:12px;border:none;border-radius:12px;font-weight:bold;font-size:16px;cursor:pointer;}
-.primary{background:#3b82f6;color:white;}
-.secondary{background:#334155;color:white;}
-.ai{background:#9333ea;color:white;}
-.status-ok{color:#22c55e;}
-.status-bad{color:#ef4444;}
-#map{height:400px;margin-top:15px;border-radius:15px;display:none;}
-</style>
-</head>
-<body>
-
-<div class="card">
-<h2>BLE AI Community Finder</h2>
-
-<p>Device: <b id="deviceName">Not Registered</b></p>
-<p>Status: <b id="status" class="status-bad">NOT CONNECTED</b></p>
-
-<button class="primary" onclick="connectTag()">Register Tag (Owner)</button>
-<button class="secondary" onclick="communityScan()">Community Scan</button>
-<button class="secondary" onclick="showLocation()">Show Location</button>
-<button class="ai" onclick="runAI()">Run AI Analysis</button>
-
-<div id="map"></div>
-</div>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <script>
+document.addEventListener("DOMContentLoaded", function(){
 
 /* ================= FIREBASE ================= */
 
@@ -59,11 +22,11 @@ const db = firebase.firestore();
 
 let deviceId = localStorage.getItem("bleDeviceId");
 let map = null;
-let currentMode = "community"; // default
+let currentMode = "community";
 
 /* ================= OWNER REGISTER ================= */
 
-async function connectTag(){
+window.connectTag = async function(){
 
 currentMode = "owner";
 
@@ -76,13 +39,11 @@ document.getElementById("deviceName").innerText=bleDevice.name||"Registered Devi
 document.getElementById("status").innerText="READY";
 document.getElementById("status").className="status-ok";
 
-/* Register device */
 await db.collection("registeredTags").doc(deviceId).set({
 owner:true,
 createdAt:Date.now()
 });
 
-/* Ask notification permission */
 if(Notification.permission!=="granted"){
 await Notification.requestPermission();
 }
@@ -121,19 +82,16 @@ new Notification("Your device was detected by community!");
 });
 }
 
-/* ================= COMMUNITY SCAN ================= */
+/* ================= COMMUNITY ================= */
 
-async function communityScan(){
+window.communityScan = async function(){
 
 currentMode = "community";
-
-/* Hide map always */
 document.getElementById("map").style.display="none";
 
 const device = await navigator.bluetooth.requestDevice({acceptAllDevices:true});
 const detectedId = device.id;
 
-/* Check if registered */
 const registered = await db.collection("registeredTags")
 .doc(detectedId)
 .get();
@@ -142,7 +100,6 @@ if(registered.exists){
 
 alert("⚠ This device is registered. Location is protected.");
 
-/* Upload detection */
 navigator.geolocation.getCurrentPosition(async(pos)=>{
 
 await db.collection("detections").add({
@@ -152,7 +109,7 @@ lng: pos.coords.longitude,
 timestamp: Date.now()
 });
 
-});
+},{enableHighAccuracy:true});
 
 return;
 }
@@ -163,7 +120,7 @@ alert("Device not registered.");
 
 /* ================= OWNER MAP ================= */
 
-async function showLocation(){
+window.showLocation = async function(){
 
 if(currentMode!=="owner"){
 alert("Only owner can view map");
@@ -187,7 +144,7 @@ renderMap(points,false);
 
 /* ================= AI ================= */
 
-async function runAI(){
+window.runAI = async function(){
 
 if(currentMode!=="owner"){
 alert("Only owner can run AI");
@@ -231,7 +188,6 @@ L.tileLayer(
 "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
 ).addTo(map);
 
-/* Blue dots */
 points.forEach(p=>{
 L.circleMarker([p.lat,p.lng],{
 radius:7,
@@ -241,7 +197,6 @@ fillOpacity:1
 }).addTo(map);
 });
 
-/* AI red dot */
 if(runAI){
 
 let avgLat=0,avgLng=0;
@@ -267,6 +222,5 @@ map.setView([avgLat,avgLng],18);
 setTimeout(()=>map.invalidateSize(),300);
 }
 
+});
 </script>
-</body>
-</html>
